@@ -126,6 +126,9 @@ npm run check
 │   ├── logger.ts           # Logging utilities
 │   └── schema.ts           # Data schemas
 ├── tests/                  # Test files
+│   ├── server/
+│       ├── load-test-50-clients.test.ts
+│       ├── websocket-multi-client.test.ts        
 └── examples/               # Example Arduino sketches
 ```
 
