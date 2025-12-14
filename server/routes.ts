@@ -53,7 +53,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // --- Examples API endpoint ---
   app.get('/api/examples', (_req, res) => {
     try {
-      const examplesDir = path.resolve(import.meta.dirname, '..', 'examples');
+      const examplesDir = path.resolve(import.meta.dirname, '..', 'public', 'examples');
       const exampleFiles: string[] = [];
       
       // Recursively read all .ino and .h files from examples and subdirectories

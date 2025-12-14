@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Development files
+.git
+.gitignore
+README.md
+.eslintrc.cjs
+.prettierrc
+tsconfig.json
+vite.config.ts
+jest.config.js
+postcss.config.js
+tailwind.config.ts
+drizzle.config.ts
+components.json
+
+# Tests and coverage
+tests/
+coverage/
+temp/
+*.test.ts
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
