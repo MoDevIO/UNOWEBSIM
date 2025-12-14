@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm ci --include=dev && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+  "buildCommand": "npm ci --include=dev && npx vite build && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
   "outputDirectory": "dist",
   "env": {
     "NODE_ENV": "production"
