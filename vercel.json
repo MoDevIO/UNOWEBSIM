@@ -4,23 +4,5 @@
   "outputDirectory": "dist",
   "env": {
     "NODE_ENV": "production"
-  },
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/index.js"
-    },
-    {
-      "src": "/ws",
-      "dest": "/index.js"
-    },
-    {
-      "src": "/public/(.*)",
-      "dest": "/public/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.js"
-    }
-  ]
+  }
 }

@@ -13,6 +13,13 @@ app.use(express.urlencoded({ extended: false }));
 // Serve example files
 app.use('/examples', express.static(path.resolve(__dirname, '..', 'public', 'examples')));
 
+// Serve public folder static files FIRST (before API routes)
+const publicPath = path.resolve(__dirname, '..', 'dist', 'public');
+app.use(express.static(publicPath, { 
+  index: false,
+  dotfiles: 'ignore'
+}));
+
 app.use((req, res, next) => {
   const start = Date.now();
   const reqPath = req.path;
