@@ -14,7 +14,8 @@ app.use(express.urlencoded({ extended: false }));
 app.use('/examples', express.static(path.resolve(__dirname, '..', 'public', 'examples')));
 
 // Serve public folder static files FIRST (before API routes)
-const publicPath = path.resolve(__dirname, '..', 'dist', 'public');
+// public is now copied to dist/public during build
+const publicPath = path.resolve(__dirname, '..', 'public');
 app.use(express.static(publicPath, { 
   index: false,
   dotfiles: 'ignore'
