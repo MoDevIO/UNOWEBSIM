@@ -1,15 +1,27 @@
 {
   "version": 2,
-  "buildCommand": "npx vite build client/ --config vite.config.ts --base ./ && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/server.js",
-  "outputDirectory": "dist/public",
-  "rewrites": [
+  "buildCommand": "npm ci --include=dev && npx vite build client/ --config vite.config.ts && npx esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --alias:@shared=./shared --external:fs --external:path --external:http --external:ws --external:url --external:express --external:crypto",
+  "outputDirectory": "dist",
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "dist/index.js": {
+      "runtime": "nodejs18.x"
+    }
+  },
+  "routes": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/server.js"
+      "src": "/api/(.*)",
+      "dest": "/index.js"
     },
     {
-      "source": "/ws",
-      "destination": "/api/server.js"
+      "src": "/ws",
+      "dest": "/index.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
     }
   ]
 }

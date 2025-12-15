@@ -10,14 +10,31 @@ node_modules/
 .git
 .gitignore
 README.md
+README\ copy.md
 .eslintrc.cjs
 .prettierrc
-tsconfig.json
-vite.config.ts
 jest.config.js
 postcss.config.js
-tailwind.config.ts
+tailwind.config.js
 drizzle.config.ts
+
+# Test and coverage files
+tests/
+coverage/
+*.test.ts
+*.spec.ts
+
+# Temporary files
+temp/
+.turbopack
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Examples (served from public, not needed in src)
+examples/
 components.json
 
 # Tests and coverage
