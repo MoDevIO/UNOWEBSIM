@@ -1,4 +1,4 @@
-import '@/lib/monaco-error-suppressor';
+import './lib/monaco-error-suppressor'; // Geändert von @/lib/...
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
