@@ -21,6 +21,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const logger = new Logger("Routes");
   const httpServer = createServer(app);
 
+  // Lightweight health endpoint for backend reachability checks
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok' });
+  });
+
   // Setup WebSocket server
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 

@@ -64,10 +64,106 @@ export default function ArduinoSimulator() {
   const [txActivity, setTxActivity] = useState(0);
   const [rxActivity, setRxActivity] = useState(0);
 
+  // Backend availability tracking
+  const [backendReachable, setBackendReachable] = useState(true);
+  const [backendPingError, setBackendPingError] = useState<string | null>(null);
+  
+  // Ref to track if backend was ever unreachable (for recovery toast)
+  const wasBackendUnreachableRef = useRef(false);
+
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { isConnected, lastMessage, messageQueue, consumeMessages, sendMessage } = useWebSocket();
+  const { isConnected, connectionError, hasEverConnected, lastMessage, messageQueue, consumeMessages, sendMessage } = useWebSocket();
+
+  // Backend / websocket reachability notifications
+  useEffect(() => {
+    if (connectionError) {
+      toast({
+        title: "Backend unreachable",
+        description: connectionError,
+        variant: "destructive",
+      });
+    } else if (!isConnected && hasEverConnected) {
+      toast({
+        title: "Connection lost",
+        description: "Trying to re-establish backend connection...",
+        variant: "destructive",
+      });
+    }
+  }, [connectionError, isConnected, hasEverConnected, toast]);
+
+  // Lightweight backend ping every second
+  useEffect(() => {
+    let cancelled = false;
+
+    const ping = async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 800);
+      try {
+        const res = await fetch('/api/health', { method: 'GET', cache: 'no-store', signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!cancelled) {
+          setBackendReachable(true);
+          setBackendPingError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setBackendReachable(false);
+          setBackendPingError((err as Error)?.message || 'Health check failed');
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    const interval = setInterval(ping, 1000);
+    ping();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Show toast when HTTP backend becomes unreachable or recovers
+  useEffect(() => {
+    if (!backendReachable) {
+      wasBackendUnreachableRef.current = true;
+      toast({
+        title: "Backend unreachable",
+        description: backendPingError || 'Could not reach API server.',
+        variant: "destructive",
+      });
+    } else if (backendReachable && wasBackendUnreachableRef.current) {
+      // Backend recovered after being unreachable
+      wasBackendUnreachableRef.current = false;
+      toast({
+        title: "Backend reachable again",
+        description: "Connection restored.",
+      });
+    }
+  }, [backendReachable, backendPingError, toast]);
+
+  const ensureBackendConnected = (actionLabel: string) => {
+    if (!backendReachable || !isConnected) {
+      toast({
+        title: "Backend unreachable",
+        description: backendPingError || connectionError || `${actionLabel} failed because the backend is not reachable. Please check the server or retry in a moment.`,
+        variant: "destructive",
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const isBackendUnreachableError = (error: unknown) => {
+    const message = (error as Error | undefined)?.message || '';
+    return message.includes('Failed to fetch')
+      || message.includes('NetworkError')
+      || message.includes('ERR_CONNECTION')
+      || message.includes('Network request failed');
+  };
 
   // Fetch default sketch
   const { data: sketches } = useQuery<Sketch[]>({
@@ -100,11 +196,12 @@ export default function ArduinoSimulator() {
         variant: data.success ? undefined : "destructive",
       });
     },
-    onError: () => {
+    onError: (error) => {
       setArduinoCliStatus('error');
+      const backendDown = isBackendUnreachableError(error);
       toast({
-        title: "Compilation with Arduino-CLI Failed",
-        description: "There were errors in your sketch",
+        title: backendDown ? "Backend unreachable" : "Compilation with Arduino-CLI Failed",
+        description: backendDown ? "API server unreachable. Please check the backend or reload." : "There were errors in your sketch",
         variant: "destructive",
       });
     },
@@ -341,8 +438,8 @@ export default function ArduinoSimulator() {
           }
           break;
         case 'compilation_error':
-          // Bei GCC-Fehler: Vorherigen Output ERSETZEN, nicht anhängen
-          // Der Arduino-CLI Output war "success", aber GCC ist fehlgeschlagen
+          // For GCC errors: REPLACE previous output, do not append
+          // Arduino-CLI reported success, but GCC failed
           console.log('[WS] GCC Compilation Error detected:', message.data);
           setCliOutput('❌ GCC Compilation Error:\n\n' + message.data);
           setGccStatus('error');
@@ -571,15 +668,18 @@ export default function ArduinoSimulator() {
   };
 
   const handleStop = () => {
+    if (!ensureBackendConnected('Simulation stoppen')) return;
     stopMutation.mutate();
   };
 
   const handleStart = () => {
+    if (!ensureBackendConnected('Simulation starten')) return;
     startMutation.mutate();
   };
 
   // Reset simulation (stop, recompile, and restart - like pressing the physical reset button)
   const handleReset = () => {
+    if (!ensureBackendConnected('Simulation zurücksetzen')) return;
     // Stop if running
     if (simulationStatus === 'running') {
       sendMessage({ type: 'stop_simulation' });
@@ -602,6 +702,7 @@ export default function ArduinoSimulator() {
   };
 
   const handleCompileAndStart = () => {
+    if (!ensureBackendConnected('Simulation starten')) return;
     // Get the actual main sketch code - prioritize editor, then tabs, then state
     let mainSketchCode: string = '';
     
@@ -667,7 +768,7 @@ export default function ArduinoSimulator() {
           setCliOutput(data.errors || '✗ Arduino-CLI Compilation failed.');
         }
         
-        // Simulation nur starten, wenn Compilation Erfolgsmeldung (je nach API-Response prüfen)
+        // Only start simulation when compilation succeeded
         if (data?.success) {
           startMutation.mutate();
           setCompilationStatus('success');
@@ -679,7 +780,7 @@ export default function ArduinoSimulator() {
             setArduinoCliStatus('idle');
           }, 2000);
         } else {
-          // Optional Fehlerhandling, falls API nicht klar success meldet
+          // Optional error handling if API response is unclear
           setCompilationStatus('error');
           toast({
             title: "Compilation Completed with Errors",
@@ -711,6 +812,7 @@ export default function ArduinoSimulator() {
   };
 
   const handleSerialSend = (message: string) => {
+    if (!ensureBackendConnected('Serial senden')) return;
     // Trigger RX LED blink (Arduino is receiving data)
     setRxActivity(prev => prev + 1);
     
@@ -779,7 +881,10 @@ export default function ArduinoSimulator() {
   }
 
   const statusInfo = getStatusInfo();
-  const simulateDisabled = simulationStatus === 'running' || compileMutation.isPending || startMutation.isPending;
+  const simulateDisabled = (simulationStatus !== 'running' && (!backendReachable || !isConnected))
+    || compileMutation.isPending
+    || startMutation.isPending
+    || stopMutation.isPending;
   const stopDisabled = simulationStatus !== 'running' || stopMutation.isPending;
   const buttonsClassName = "hover:bg-green-600 hover:text-white transition-colors";
 
@@ -888,20 +993,20 @@ export default function ArduinoSimulator() {
           <div className="flex items-center space-x-3">
             <Button
               onClick={simulationStatus === 'running' ? handleStop : handleCompileAndStart}
-              disabled={compileMutation.isPending || startMutation.isPending || stopMutation.isPending}
+              disabled={simulateDisabled}
               className={clsx(
                 'w-64',
                 '!text-white',
                 'transition-colors',
                 {
-                  // Klassen für den Zustand 'running' (rot für Stop)
-                  '!bg-orange-600 hover:!bg-orange-700': simulationStatus === 'running' && !(compileMutation.isPending || startMutation.isPending || stopMutation.isPending),
+                  // Classes for the 'running' state (orange for Stop)
+                  '!bg-orange-600 hover:!bg-orange-700': simulationStatus === 'running' && !simulateDisabled,
 
-                  // Klassen für den Zustand 'stopped' (grün für Start)
-                  '!bg-green-600 hover:!bg-green-700': simulationStatus !== 'running' && !(compileMutation.isPending || startMutation.isPending || stopMutation.isPending),
+                  // Classes for the 'stopped' state (green for Start)
+                  '!bg-green-600 hover:!bg-green-700': simulationStatus !== 'running' && !simulateDisabled,
 
-                  // Klassen für den 'disabled' Zustand (unabhängig von simulationStatus)
-                  'opacity-50 cursor-not-allowed': compileMutation.isPending || startMutation.isPending || stopMutation.isPending,
+                  // Classes for the disabled state (regardless of simulationStatus)
+                  'opacity-50 cursor-not-allowed bg-gray-500 hover:!bg-gray-500': simulateDisabled,
                 }
               )}
               data-testid="button-simulate-toggle"

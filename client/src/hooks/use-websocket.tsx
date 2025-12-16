@@ -5,6 +5,8 @@ export function useWebSocket() {
   const [isConnected, setIsConnected] = useState(false);
   const [lastMessage, setLastMessage] = useState<WSMessage | null>(null);
   const [messageQueue, setMessageQueue] = useState<WSMessage[]>([]);
+  const [hasEverConnected, setHasEverConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
@@ -20,6 +22,8 @@ export function useWebSocket() {
       ws.onopen = () => {
         console.log('WebSocket connected');
         setIsConnected(true);
+        setHasEverConnected(true);
+        setConnectionError(null);
         reconnectAttemptsRef.current = 0; // Reset reconnect attempts on success
       };
 
@@ -39,6 +43,7 @@ export function useWebSocket() {
       ws.onclose = () => {
         console.log('WebSocket disconnected');
         setIsConnected(false);
+        setConnectionError('WebSocket disconnected. Reconnecting...');
         // Attempt to reconnect
         scheduleReconnect();
       };
@@ -46,10 +51,13 @@ export function useWebSocket() {
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
         setIsConnected(false);
+        setConnectionError('WebSocket error. Backend may be unreachable.');
+        scheduleReconnect();
       };
     } catch (error) {
       console.error('Failed to create WebSocket:', error);
       setIsConnected(false);
+      setConnectionError('Cannot establish WebSocket. Backend unreachable.');
       scheduleReconnect();
     }
   };
@@ -101,5 +109,7 @@ export function useWebSocket() {
     messageQueue,
     consumeMessages,
     sendMessage,
+    hasEverConnected,
+    connectionError,
   };
 }
