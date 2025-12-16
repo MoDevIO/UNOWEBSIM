@@ -913,7 +913,14 @@ export default function ArduinoSimulator() {
       <div className="bg-card border-b border-border px-4 py-3 flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
-            <Cpu className="text-accent h-5 w-5" />
+            <Cpu 
+              className="h-5 w-5" 
+              style={{
+                color: simulationStatus === 'running' ? '#22c55e' : '#6b7280',
+                filter: simulationStatus === 'running' ? 'drop-shadow(0 0 6px #22c55e)' : 'none',
+                transition: 'color 200ms ease-in-out, filter 200ms ease-in-out'
+              }}
+            />
             <h1 className="text-lg font-semibold">Arduino UNO Simulator</h1>
           </div>
           <div className="flex items-center space-x-2 text-sm text-muted-foreground">

@@ -194,6 +194,10 @@ export function SerialMonitor({
           <div className="flex items-center space-x-2 flex-shrink-0">
             <div
               className={`w-2 h-2 rounded-full ${isSimulationRunning ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground'}`}
+              style={{
+                boxShadow: isSimulationRunning ? '0 0 8px rgba(34, 197, 94, 0.8)' : 'none',
+                transition: 'box-shadow 200ms ease-in-out'
+              }}
               data-testid="connection-indicator"
             />
             <i className="fas fa-comments text-accent text-sm"></i>

@@ -248,18 +248,15 @@ export function ArduinoBoard({
       {/* Header */}
       <div className="flex items-center justify-between bg-muted px-3 py-2 border-b border-border">
         <div className="flex items-center space-x-2">
-          <Cpu className="h-4 w-4 text-accent" />
-          <span className="text-sm font-medium">Arduino UNO Board</span>
-        </div>
-        <div className="flex items-center space-x-2">
-          <div
-            className={`w-2 h-2 rounded-full ${
-              isSimulationRunning ? 'bg-green-500 animate-pulse' : 'bg-gray-500'
-            }`}
+          <Cpu 
+            className="h-4 w-4" 
+            style={{
+              color: isSimulationRunning ? '#22c55e' : '#6b7280',
+              filter: isSimulationRunning ? 'drop-shadow(0 0 4px #22c55e)' : 'none',
+              transition: 'color 200ms ease-in-out, filter 200ms ease-in-out'
+            }}
           />
-          <span className="text-xs text-muted-foreground">
-            {isSimulationRunning ? 'Running' : 'Stopped'}
-          </span>
+          <span className="text-sm font-medium">Arduino UNO Board</span>
         </div>
       </div>
 
