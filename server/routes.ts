@@ -406,6 +406,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
             break;
 
+          case 'set_pin_value':
+            {
+              const clientState = clientRunners.get(ws);
+              if (clientState?.runner && clientState?.isRunning) {
+                clientState.runner.setPinValue(data.pin, data.value);
+              } else {
+                logger.warn('Pin value set received but simulation is not running.');
+              }
+            }
+            break;
+
           default:
             logger.warn(`Unbekannter WebSocket Nachrichtentyp: ${data.type}`);
             break;

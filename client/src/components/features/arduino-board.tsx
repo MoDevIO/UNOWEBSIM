@@ -14,6 +14,7 @@ interface ArduinoBoardProps {
   txActive?: number; // TX activity counter (changes trigger blink)
   rxActive?: number; // RX activity counter (changes trigger blink)
   onReset?: () => void; // Callback when reset button is clicked
+  onPinToggle?: (pin: number, newValue: number) => void; // Callback when an INPUT pin is clicked
 }
 
 // Digital pin positions in the SVG (x coordinates, y=19 for all)
@@ -41,6 +42,7 @@ export function ArduinoBoard({
   txActive = 0,
   rxActive = 0,
   onReset,
+  onPinToggle,
 }: ArduinoBoardProps) {
   const [svgContent, setSvgContent] = useState<string>('');
   const [txBlink, setTxBlink] = useState(false);
@@ -107,49 +109,103 @@ export function ArduinoBoard({
     };
   }, [onReset]);
 
+  // Use event delegation for INPUT pin toggle clicks
+  useEffect(() => {
+    if (!containerRef.current || !onPinToggle) return;
+
+    const handlePinToggleClick = (e: MouseEvent) => {
+      const target = e.target as Element;
+      const pinAttr = target.getAttribute('data-pin-input');
+      
+      if (pinAttr) {
+        e.stopPropagation();
+        const pin = parseInt(pinAttr);
+        const state = pinStates.find(p => p.pin === pin);
+        if (state && (state.mode === 'INPUT' || state.mode === 'INPUT_PULLUP')) {
+          // Toggle the value: 0 -> 1, 1 -> 0
+          const newValue = state.value > 0 ? 0 : 1;
+          onPinToggle(pin, newValue);
+        }
+      }
+    };
+
+    containerRef.current.addEventListener('click', handlePinToggleClick);
+    
+    return () => {
+      containerRef.current?.removeEventListener('click', handlePinToggleClick);
+    };
+  }, [onPinToggle, pinStates]);
+
   // PWM-capable pins on Arduino UNO
   const PWM_PINS = [3, 5, 6, 9, 10, 11];
 
-  // Get the color for a digital pin based on its state
+  // Get the color for a digital pin based on its state (same logic for INPUT and OUTPUT)
   const getPinColor = (pin: number): string => {
     const state = pinStates.find(p => p.pin === pin);
     if (!state) return 'transparent'; // No state = no overlay
     
-    if (state.mode === 'OUTPUT') {
-      // Check if this is a PWM pin with analog value
-      if (state.type === 'pwm' && PWM_PINS.includes(pin)) {
-        // PWM: interpolate between black (0) and red (255)
-        const intensity = Math.round((state.value / 255) * 255);
-        return `rgb(${intensity}, 0, 0)`;
-      } else if (state.value > 0) {
-        // HIGH (5V) = red
-        return '#ff0000';
-      } else {
-        // LOW (0V) = black
-        return '#000000';
-      }
-    } else if (state.mode === 'INPUT' || state.mode === 'INPUT_PULLUP') {
-      // Input mode = yellow
-      return '#ffff00';
+    // Check if this is a PWM pin with analog value
+    if (state.type === 'pwm' && PWM_PINS.includes(pin)) {
+      // PWM: interpolate between black (0) and red (255)
+      const intensity = Math.round((state.value / 255) * 255);
+      return `rgb(${intensity}, 0, 0)`;
+    } else if (state.value > 0) {
+      // HIGH (5V) = red
+      return '#ff0000';
+    } else {
+      // LOW (0V) = black
+      return '#000000';
     }
-    return 'transparent';
   };
 
-  // Generate SVG circles for pin state overlays
+  // Check if a pin is in INPUT mode
+  const isPinInput = (pin: number): boolean => {
+    const state = pinStates.find(p => p.pin === pin);
+    return state !== undefined && (state.mode === 'INPUT' || state.mode === 'INPUT_PULLUP');
+  };
+
+  // Generate SVG shapes for pin state overlays
   const generatePinOverlays = (): string => {
     let overlays = '';
     
     for (const [pinStr, pos] of Object.entries(DIGITAL_PIN_POSITIONS)) {
       const pin = parseInt(pinStr);
       const color = getPinColor(pin);
+      const isInput = isPinInput(pin);
+      
+      // Add yellow square frame for INPUT pins (behind the circle)
+      if (isInput) {
+        const frameSize = 7;
+        overlays += `
+          <rect 
+            x="${pos.x - frameSize/2}" y="${pos.y - frameSize/2}" 
+            width="${frameSize}" height="${frameSize}" 
+            fill="none"
+            stroke="#ffff00"
+            stroke-width="1"
+            style="filter: drop-shadow(0 0 2px #ffff00);"
+          />
+        `;
+      }
       
       if (color !== 'transparent') {
-        // Add a glowing circle overlay on the pin
+        // Circle for all pins
         overlays += `
           <circle cx="${pos.x}" cy="${pos.y}" r="2.5" 
             fill="${color}" 
             fill-opacity="0.8"
             style="filter: drop-shadow(0 0 2px ${color});"
+          />
+        `;
+      }
+      
+      // Add invisible larger clickable area for INPUT pins (on top)
+      if (isInput) {
+        overlays += `
+          <circle cx="${pos.x}" cy="${pos.y}" r="6" 
+            fill="transparent"
+            style="cursor: pointer;"
+            data-pin-input="${pin}"
           />
         `;
       }

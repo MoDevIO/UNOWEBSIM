@@ -286,12 +286,12 @@ int main() {
 
             lines.forEach(line => {
                 if (line.length > 0) {
-                    this.logger.warn(`[STDERR line]: ${JSON.stringify(line)}`);
-                    
-                    // Check for pin state messages
+                    // Check for pin state messages (these are internal protocol, not errors)
                     const pinModeMatch = line.match(/\[\[PIN_MODE:(\d+):(\d+)\]\]/);
                     const pinValueMatch = line.match(/\[\[PIN_VALUE:(\d+):(\d+)\]\]/);
                     const pinPwmMatch = line.match(/\[\[PIN_PWM:(\d+):(\d+)\]\]/);
+                    const dreadMatch = line.match(/\[\[DREAD:(\d+):(\d+)\]\]/);
+                    const pinSetMatch = line.match(/\[\[PIN_SET:(\d+):(\d+)\]\]/);
                     
                     if (pinModeMatch && onPinState) {
                         const pin = parseInt(pinModeMatch[1]);
@@ -305,7 +305,13 @@ int main() {
                         const pin = parseInt(pinPwmMatch[1]);
                         const value = parseInt(pinPwmMatch[2]);
                         onPinState(pin, 'pwm', value);
+                    } else if (dreadMatch) {
+                        // digitalRead debug - don't send to client
+                    } else if (pinSetMatch) {
+                        // pin set confirmed - don't send to client
                     } else {
+                        // Only log and send actual errors, not protocol messages
+                        this.logger.warn(`[STDERR]: ${line}`);
                         onError(line);
                     }
                 }
@@ -555,6 +561,16 @@ int main() {
         }
     }
 
+    setPinValue(pin: number, value: number) {
+        if (this.isRunning && this.process && this.process.stdin && !this.process.killed) {
+            // Send special command to set pin value
+            const command = `[[SET_PIN:${pin}:${value}]]\n`;
+            this.process.stdin.write(command);
+        } else {
+            this.logger.warn("setPinValue: Simulator läuft nicht - pin value ignored");
+        }
+    }
+
     // Send output character by character with baudrate delay
     private sendOutputWithDelay(onOutput: (line: string, isComplete?: boolean) => void) {
         if (this.outputBuffer.length === 0 || !this.isRunning) {
@@ -587,6 +603,8 @@ int main() {
     private scheduleFlush(onOutput: (line: string, isComplete?: boolean) => void) {
         if (this.flushTimer) return;
         
+        // Use a fixed short timeout - the C++ side handles actual baudrate simulation
+        // This just ensures incomplete lines get flushed to the UI
         this.flushTimer = setTimeout(() => {
             this.flushTimer = null;
             if (this.outputBuffer.length > 0) {
@@ -594,7 +612,7 @@ int main() {
                 this.outputBuffer = "";
                 this.pendingIncomplete = false;
             }
-        }, Math.max(1, (10 * 1000) / this.baudrate)); // Flush after one char delay
+        }, 50); // Fixed 50ms flush timeout
     }
 
     private scheduleErrorFlush(onError: (line: string) => void, onPinState?: (pin: number, type: 'mode' | 'value' | 'pwm', value: number) => void) {
@@ -609,6 +627,8 @@ int main() {
                     const pinModeMatch = line.match(/\[\[PIN_MODE:(\d+):(\d+)\]\]/);
                     const pinValueMatch = line.match(/\[\[PIN_VALUE:(\d+):(\d+)\]\]/);
                     const pinPwmMatch = line.match(/\[\[PIN_PWM:(\d+):(\d+)\]\]/);
+                    const dreadMatch = line.match(/\[\[DREAD:(\d+):(\d+)\]\]/);
+                    const pinSetMatch = line.match(/\[\[PIN_SET:(\d+):(\d+)\]\]/);
                     
                     if (pinModeMatch && onPinState) {
                         const pin = parseInt(pinModeMatch[1]);
@@ -622,6 +642,8 @@ int main() {
                         const pin = parseInt(pinPwmMatch[1]);
                         const value = parseInt(pinPwmMatch[2]);
                         onPinState(pin, 'pwm', value);
+                    } else if (dreadMatch || pinSetMatch) {
+                        // Debug output - don't send to client
                     } else {
                         onError(line);
                     }

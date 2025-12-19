@@ -763,6 +763,34 @@ export default function ArduinoSimulator() {
     }, 100);
   };
 
+  // Toggle INPUT pin value (called when user clicks on an INPUT pin square)
+  const handlePinToggle = (pin: number, newValue: number) => {
+    if (simulationStatus !== 'running') {
+      toast({
+        title: "Simulation nicht aktiv",
+        description: "Starte die Simulation, um Pin-Werte zu ändern.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Send the new pin value to the server
+    sendMessage({ type: 'set_pin_value', pin, value: newValue });
+    
+    // Update local pin state immediately for responsive UI
+    setPinStates(prev => {
+      const newStates = [...prev];
+      const existingIndex = newStates.findIndex(p => p.pin === pin);
+      if (existingIndex >= 0) {
+        newStates[existingIndex] = {
+          ...newStates[existingIndex],
+          value: newValue,
+        };
+      }
+      return newStates;
+    });
+  };
+
   const handleCompileAndStart = () => {
     if (!ensureBackendConnected('Simulation starten')) return;
     // Get the actual main sketch code - prioritize editor, then tabs, then state
@@ -1168,6 +1196,7 @@ export default function ArduinoSimulator() {
                   txActive={txActivity}
                   rxActive={rxActivity}
                   onReset={handleReset}
+                  onPinToggle={handlePinToggle}
                 />
               </ResizablePanel>
             </ResizablePanelGroup>

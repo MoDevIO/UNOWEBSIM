@@ -33,6 +33,9 @@ export const ARDUINO_MOCK_CODE = `
 #include <cstring>
 #include <algorithm> // For std::tolower/toupper in String
 #include <iomanip>   // For std::setprecision
+#include <sstream>   // For std::ostringstream
+#include <unistd.h>  // For STDIN_FILENO
+#include <sys/select.h> // For select()
 using namespace std;
 
 // Arduino specific types
@@ -133,7 +136,16 @@ public:
 
 // Pin state tracking for visualization
 static int pinModes[20] = {0};   // 0=INPUT, 1=OUTPUT, 2=INPUT_PULLUP
-static int pinValues[20] = {0};  // Digital: 0=LOW, 1=HIGH
+static std::atomic<int> pinValues[20];  // Thread-safe: Digital 0=LOW, 1=HIGH
+
+// Initialize atomic array (called before main)
+struct PinValuesInitializer {
+    PinValuesInitializer() {
+        for (int i = 0; i < 20; i++) {
+            pinValues[i].store(0);
+        }
+    }
+} pinValuesInit;
 
 // GPIO Functions with state tracking
 void pinMode(int pin, int mode) {
@@ -146,7 +158,7 @@ void pinMode(int pin, int mode) {
 
 void digitalWrite(int pin, int value) {
     if (pin >= 0 && pin < 20) {
-        pinValues[pin] = value;
+        pinValues[pin].store(value);
         // Send pin state update via stderr (special protocol)
         std::cerr << "[[PIN_VALUE:" << pin << ":" << value << "]]" << std::endl;
     }
@@ -154,14 +166,15 @@ void digitalWrite(int pin, int value) {
 
 int digitalRead(int pin) { 
     if (pin >= 0 && pin < 20) {
-        return pinValues[pin];
+        int val = pinValues[pin].load(std::memory_order_seq_cst);
+        return val;
     }
     return LOW; 
 }
 
 void analogWrite(int pin, int value) {
     if (pin >= 0 && pin < 20) {
-        pinValues[pin] = value;
+        pinValues[pin].store(value);
         // Send PWM value update via stderr
         std::cerr << "[[PIN_PWM:" << pin << ":" << value << "]]" << std::endl;
     }
@@ -209,6 +222,32 @@ private:
     std::mutex mtx;
     std::queue<uint8_t> inputBuffer;
     unsigned long _timeout = 1000; // Default timeout 1 second
+    bool initialized = false;
+    long _baudrate = 9600;
+    
+    // Simulate serial transmission delay for n characters
+    // 10 bits per char: start + 8 data + stop
+    void txDelay(size_t numChars) {
+        if (_baudrate > 0 && numChars > 0) {
+            // Microseconds total = (10 bits * numChars * 1000000) / baudrate
+            long totalUs = (10L * numChars * 1000000L) / _baudrate;
+            if (totalUs > 100) { // Only delay if significant (> 0.1ms)
+                std::this_thread::sleep_for(std::chrono::microseconds(totalUs));
+            }
+        }
+    }
+    
+    // Output string with baud-rate delay (like real Arduino)
+    void serialWrite(const std::string& s) {
+        std::cout << s << std::flush;
+        txDelay(s.length());
+    }
+    
+    void serialWrite(char c) {
+        std::cout << c << std::flush;
+        txDelay(1);
+    }
+    
 public:
     SerialClass() {
         std::cout.setf(std::ios::unitbuf);
@@ -220,8 +259,16 @@ public:
         return true; // The serial connection is always considered 'ready' in the mock
     }
     
-    void begin(long) {}
-    void begin(long, int) {}
+    void begin(long baud) {
+        _baudrate = baud;
+        if (!initialized) {
+            // Disable buffering on stdout and stderr for immediate output
+            setvbuf(stdout, NULL, _IONBF, 0);
+            setvbuf(stderr, NULL, _IONBF, 0);
+            initialized = true;
+        }
+    }
+    void begin(long baud, int config) { begin(baud); }
     void end() {}
     
     // Set timeout for read operations (in milliseconds)
@@ -298,16 +345,17 @@ public:
         std::cout << std::flush;
     }
     
-    // Helper for number format conversion
-    void printNumber(long n, int base) {
+    // Helper for number format conversion - returns string
+    std::string formatNumber(long n, int base) {
+        std::ostringstream oss;
         if (base == DEC) {
-            std::cout << n;
+            oss << n;
         } else if (base == HEX) {
-            std::cout << std::hex << n << std::dec;
+            oss << std::hex << n << std::dec;
         } else if (base == OCT) {
-            std::cout << std::oct << n << std::dec;
+            oss << std::oct << n << std::dec;
         } else if (base == BIN) {
-            if (n == 0) { std::cout << "0"; }
+            if (n == 0) { oss << "0"; }
             else {
                 std::string binary;
                 unsigned long un = (n < 0) ? (unsigned long)n : n;
@@ -315,19 +363,28 @@ public:
                     binary = ((un & 1) ? "1" : "0") + binary;
                     un >>= 1;
                 }
-                std::cout << binary;
+                oss << binary;
             }
         }
-        std::cout << std::flush;
+        return oss.str();
+    }
+    
+    void printNumber(long n, int base) {
+        serialWrite(formatNumber(n, base));
     }
     
     template<typename T> void print(T v) { 
-        std::cout << v << std::flush; 
+        std::ostringstream oss;
+        oss << v;
+        serialWrite(oss.str());
     }
     
     // Spezielle Überladung für byte/uint8_t (wird sonst als char ausgegeben)
-    // Note: byte = uint8_t = unsigned char, daher nur EINE Überladung nötig
-    void print(byte v) { std::cout << (int)v << std::flush; }
+    void print(byte v) { 
+        std::ostringstream oss;
+        oss << (int)v;
+        serialWrite(oss.str());
+    }
     
     // print with base format (DEC, HEX, OCT, BIN)
     void print(int v, int base) { printNumber(v, base); }
@@ -338,50 +395,62 @@ public:
     
     // Überladung für Floating-Point mit Dezimalstellen
     void print(float v, int decimals) {
-        std::cout << std::fixed << std::setprecision(decimals) << v << std::flush;
-        std::cout.unsetf(std::ios::fixed);
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(decimals) << v;
+        serialWrite(oss.str());
     }
     
     void print(double v, int decimals) {
-        std::cout << std::fixed << std::setprecision(decimals) << v << std::flush;
-        std::cout.unsetf(std::ios::fixed);
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(decimals) << v;
+        serialWrite(oss.str());
     }
 
     template<typename T> void println(T v) { 
-        std::cout << v << std::endl << std::flush; 
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::ostringstream oss;
+        oss << v << "\\n";
+        serialWrite(oss.str());
     }
     
     // Spezielle Überladung für byte/uint8_t (wird sonst als char ausgegeben)
-    // Note: byte = uint8_t = unsigned char, daher nur EINE Überladung nötig
     void println(byte v) { 
-        std::cout << (int)v << std::endl << std::flush;
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::ostringstream oss;
+        oss << (int)v << "\\n";
+        serialWrite(oss.str());
     }
     
     // println with base format (DEC, HEX, OCT, BIN)
-    void println(int v, int base) { printNumber(v, base); std::cout << std::endl; }
-    void println(long v, int base) { printNumber(v, base); std::cout << std::endl; }
-    void println(unsigned int v, int base) { printNumber(v, base); std::cout << std::endl; }
-    void println(unsigned long v, int base) { printNumber(v, base); std::cout << std::endl; }
-    void println(byte v, int base) { printNumber(v, base); std::cout << std::endl; }
+    void println(int v, int base) { 
+        serialWrite(formatNumber(v, base) + "\\n");
+    }
+    void println(long v, int base) { 
+        serialWrite(formatNumber(v, base) + "\\n");
+    }
+    void println(unsigned int v, int base) { 
+        serialWrite(formatNumber(v, base) + "\\n");
+    }
+    void println(unsigned long v, int base) { 
+        serialWrite(formatNumber(v, base) + "\\n");
+    }
+    void println(byte v, int base) { 
+        serialWrite(formatNumber(v, base) + "\\n");
+    }
     
     // Überladung für Floating-Point mit Dezimalstellen
     void println(float v, int decimals) {
-        std::cout << std::fixed << std::setprecision(decimals) << v << std::endl << std::flush;
-        std::cout.unsetf(std::ios::fixed);
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(decimals) << v << "\\n";
+        serialWrite(oss.str());
     }
     
     void println(double v, int decimals) {
-        std::cout << std::fixed << std::setprecision(decimals) << v << std::endl << std::flush;
-        std::cout.unsetf(std::ios::fixed);
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(decimals) << v << "\\n";
+        serialWrite(oss.str());
     }
     
     void println() { 
-        std::cout << std::endl << std::flush; 
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        serialWrite("\\n");
     }
 
     // parseInt() - Reads next integer from Serial Input
@@ -489,18 +558,59 @@ public:
 
 SerialClass Serial;
 
+// Helper function to set pin value from external input (called from serialInputReader thread)
+void setExternalPinValue(int pin, int value) {
+    if (pin >= 0 && pin < 20) {
+        pinValues[pin].store(value, std::memory_order_seq_cst);
+        // Send pin state update so UI reflects the change
+        std::cerr << "[[PIN_VALUE:" << pin << ":" << value << "]]" << std::endl;
+    }
+}
 
 void serialInputReader() {
-    constexpr size_t bufferSize = 128;
+    constexpr size_t bufferSize = 256;
     char buffer[bufferSize];
+    
+    // Use select() for non-blocking check on POSIX systems
+    fd_set readfds;
+    struct timeval tv;
 
     while (keepReading.load()) {
-        if (fgets(buffer, bufferSize, stdin) != nullptr) {
-            size_t len = strlen(buffer);
-            Serial.mockInput(buffer, len);
-        } else {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Check if data is available on stdin (non-blocking)
+        FD_ZERO(&readfds);
+        FD_SET(STDIN_FILENO, &readfds);
+        tv.tv_sec = 0;
+        tv.tv_usec = 50000; // 50ms timeout
+        
+        int ready = select(STDIN_FILENO + 1, &readfds, NULL, NULL, &tv);
+        
+        if (ready > 0 && FD_ISSET(STDIN_FILENO, &readfds)) {
+            if (fgets(buffer, bufferSize, stdin) != nullptr) {
+                size_t len = strlen(buffer);
+                
+                // Remove trailing newline if present
+                if (len > 0 && (buffer[len-1] == 10 || buffer[len-1] == 13)) {
+                    buffer[len-1] = 0;
+                    len--;
+                }
+                if (len > 0 && (buffer[len-1] == 10 || buffer[len-1] == 13)) {
+                    buffer[len-1] = 0;
+                    len--;
+                }
+                
+                // Check for special pin value command: [[SET_PIN:X:Y]]
+                int pin, value;
+                if (sscanf(buffer, "[[SET_PIN:%d:%d]]", &pin, &value) == 2) {
+                    setExternalPinValue(pin, value);
+                } else if (len > 0) {
+                    // Normal serial input (add newline back for serial input)
+                    Serial.mockInput(buffer, len);
+                    char newline = 10;
+                    Serial.mockInput(&newline, 1);
+                }
+            }
         }
+        // No sleep needed - select() handles the waiting
     }
 }
 `;
