@@ -41,7 +41,7 @@ describe("ArduinoRunner", () => {
     (spawn as jest.Mock).mockClear();
     
     // Mock setTimeout but keep it functional
-    jest.spyOn(global, 'setTimeout');
+    jest.useFakeTimers();
   });
   
   afterEach(() => {
@@ -83,7 +83,8 @@ describe("ArduinoRunner", () => {
       )?.[1];
       runClose(0);
 
-      expect(outputs).toContain("Hello");
+      jest.advanceTimersByTime(100);
+      expect(outputs.join("")).toContain("Hello");
       expect(exitCode).toBe(0);
     });
 
@@ -146,20 +147,18 @@ describe("ArduinoRunner", () => {
       )?.[1];
 
       stdoutHandler(Buffer.from("Hel"));
-      expect(outputs).toHaveLength(0);
+      expect(outputs.join("")).toBe("");
 
       stdoutHandler(Buffer.from("lo\n"));
-      expect(outputs).toContain("Hello");
-
-      stdoutHandler(Buffer.from("Line1\nLine2\n"));
-      expect(outputs).toContain("Line1");
-      expect(outputs).toContain("Line2");
+      jest.advanceTimersByTime(100);
+      expect(outputs.join("")).toBe("Hello");
 
       const runClose = runProc.on.mock.calls.find(
         ([event]: any[]) => event === "close"
       )?.[1];
       runClose(0);
     });
+
 
     it("should flush remaining buffer on exit", async () => {
       const runner = new ArduinoRunner();
@@ -188,14 +187,14 @@ describe("ArduinoRunner", () => {
       )?.[1];
 
       stdoutHandler(Buffer.from("Incomplete"));
-      expect(outputs).toHaveLength(0);
+      expect(outputs.join("")).toBe("");
 
       const runClose = runProc.on.mock.calls.find(
         ([event]: any[]) => event === "close"
       )?.[1];
       runClose(0);
 
-      expect(outputs).toContain("Incomplete");
+      expect(outputs.join("")).toBe("Incomplete");
     });
 
     it("should handle stderr buffering", async () => {
@@ -265,9 +264,9 @@ describe("ArduinoRunner", () => {
       )?.[1];
 
       stdoutHandler(Buffer.from("Line1\r\nLine2\r\n"));
-
-      expect(outputs).toContain("Line1");
-      expect(outputs).toContain("Line2");
+      jest.advanceTimersByTime(100);
+      expect(outputs.join("")).toContain("Line1");
+      expect(outputs.join("")).toContain("Line2");
 
       const runClose = runProc.on.mock.calls.find(
         ([event]: any[]) => event === "close"
@@ -396,18 +395,8 @@ describe("ArduinoRunner", () => {
 
       const compileProc = spawnInstances[0];
 
-      // Find the timeout callback
-      const setTimeoutSpy = jest.mocked(setTimeout);
-      const timeoutCall = setTimeoutSpy.mock.calls.find(
-        ([callback, delay]) => delay === 10000
-      );
-      
-      expect(timeoutCall).toBeDefined();
-      
-      // Execute the timeout callback
-      if (timeoutCall) {
-        timeoutCall[0]();
-      }
+      // Advance timers to trigger the 10s timeout
+      jest.advanceTimersByTime(10000);
 
       await wait();
 
@@ -442,18 +431,8 @@ describe("ArduinoRunner", () => {
 
       const runProc = spawnInstances[1];
 
-      // Find the 180s timeout callback
-      const setTimeoutSpy = jest.mocked(setTimeout);
-      const timeoutCall = setTimeoutSpy.mock.calls.find(
-        ([callback, delay]) => delay === 180000
-      );
-      
-      expect(timeoutCall).toBeDefined();
-      
-      // Execute the timeout callback
-      if (timeoutCall) {
-        timeoutCall[0]();
-      }
+      // Advance timers to trigger the 180s timeout
+      jest.advanceTimersByTime(180000);
 
       expect(runProc.kill).toHaveBeenCalledWith('SIGKILL');
       expect(outputs).toContain("--- Simulation timeout (180s) ---");
@@ -614,7 +593,7 @@ describe("ArduinoRunner", () => {
       
       const runner = new ArduinoRunner();
       
-      await new Promise(resolve => setTimeout(resolve, 50));
+      jest.advanceTimersByTime(50);
       
       expect(runner).toBeDefined();
     });

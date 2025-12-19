@@ -18,7 +18,7 @@ const SANDBOX_CONFIG = {
     maxMemoryMB: 128,           // Max 128MB RAM
     maxCpuPercent: 50,          // Max 50% of one CPU
     maxExecutionTimeSec: 60,    // Max 60 seconds runtime
-    maxOutputBytes: 1024 * 1024, // Max 1MB output
+    maxOutputBytes: 100 * 1024 * 1024, // Max 100MB output
     
     // Security settings
     noNetwork: true,            // No network access
@@ -34,12 +34,16 @@ export class SandboxRunner {
     private logger = new Logger("SandboxRunner");
     private outputBuffer = "";
     private errorBuffer = "";
-    private flushTimer: NodeJS.Timeout | null = null;
-    private pendingIncomplete = false;
+    private lineBuffer = "";
+    private lineQueue: string[] = [];
     private totalOutputBytes = 0;
     private dockerAvailable = false;
     private dockerImageBuilt = false;
     private currentSketchDir: string | null = null;
+    private baudrate = 9600; // Default baudrate
+    private isSendingOutput = false; // Flag to prevent overlapping sends
+    private flushTimer: NodeJS.Timeout | null = null;
+    private pendingIncomplete = false;
 
     constructor() {
         mkdir(this.tempDir, { recursive: true })
@@ -93,9 +97,14 @@ export class SandboxRunner {
         this.isRunning = true;
         this.outputBuffer = "";
         this.errorBuffer = "";
-        this.pendingIncomplete = false;
+        this.isSendingOutput = false;
         this.totalOutputBytes = 0;
         let compilationFailed = false;
+
+        // Parse baudrate from code
+        const baudMatch = code.match(/Serial\s*\.\s*begin\s*\(\s*(\d+)\s*\)/);
+        this.baudrate = baudMatch ? parseInt(baudMatch[1]) : 9600;
+        this.logger.info(`Parsed baudrate: ${this.baudrate}`);
 
         const sketchId = randomUUID();
         const sketchDir = join(this.tempDir, sketchId);
@@ -240,7 +249,7 @@ int main() {
             this.totalOutputBytes += str.length;
             if (this.totalOutputBytes > SANDBOX_CONFIG.maxOutputBytes) {
                 this.stop();
-                onError("Output size limit exceeded (1MB)");
+                onError("Output size limit exceeded");
                 return;
             }
 
@@ -259,11 +268,9 @@ int main() {
                 }
             });
 
-            if (this.outputBuffer.length > 0) {
+            // Schedule flush for incomplete output based on baudrate
+            if (this.outputBuffer.length > 0 && !this.flushTimer) {
                 this.scheduleFlush(onOutput);
-            } else if (this.flushTimer) {
-                clearTimeout(this.flushTimer);
-                this.flushTimer = null;
             }
         });
 
@@ -458,30 +465,18 @@ int main() {
             this.totalOutputBytes += str.length;
             if (this.totalOutputBytes > SANDBOX_CONFIG.maxOutputBytes) {
                 this.stop();
-                onError("Output size limit exceeded (1MB)");
+                onError("Output size limit exceeded");
                 return;
             }
 
-            this.outputBuffer += str;
-            const lines = this.outputBuffer.split(/\r?\n/);
-            this.outputBuffer = lines.pop() || "";
+            // Limit buffer size to simulate blocking Serial output
+            // If buffer is too full, discard new data (simulates waiting for transmission)
+            if (this.outputBuffer.length < 1000) {
+                this.outputBuffer += str;
+            } // Else discard to prevent unlimited buffering
 
-            lines.forEach(line => {
-                if (line.length > 0) {
-                    if (this.pendingIncomplete) {
-                        onOutput(line, true);
-                        this.pendingIncomplete = false;
-                    } else {
-                        onOutput(line, true);
-                    }
-                }
-            });
-
-            if (this.outputBuffer.length > 0) {
-                this.scheduleFlush(onOutput);
-            } else if (this.flushTimer) {
-                clearTimeout(this.flushTimer);
-                this.flushTimer = null;
+            if (!this.isSendingOutput) {
+                this.sendOutputWithDelay(onOutput);
             }
         });
 
@@ -517,21 +512,13 @@ int main() {
                     }
                 }
             });
-
-            if (this.errorBuffer.length > 0) {
-                this.scheduleErrorFlush(onError, onPinState);
-            }
         });
 
         this.process?.on("close", (code) => {
             if (timeout) clearTimeout(timeout);
 
-            if (this.flushTimer) {
-                clearTimeout(this.flushTimer);
-                this.flushTimer = null;
-            }
-
-            if (this.outputBuffer.trim()) {
+            // Send any remaining buffered output immediately, but only if not killed (natural exit)
+            if (!this.processKilled && this.outputBuffer.trim()) {
                 onOutput(this.outputBuffer.trim(), true);
             }
             if (this.errorBuffer.trim()) {
@@ -560,49 +547,6 @@ int main() {
             .trim();
     }
 
-    private scheduleFlush(onOutput: (line: string, isComplete: boolean) => void) {
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-        }
-
-        this.flushTimer = setTimeout(() => {
-            if (this.outputBuffer.length > 0) {
-                onOutput(this.outputBuffer, false);
-                this.pendingIncomplete = true;
-                this.outputBuffer = "";
-            }
-            this.flushTimer = null;
-        }, 50);
-    }
-
-    private scheduleErrorFlush(onError: (line: string) => void, onPinState?: (pin: number, type: 'mode' | 'value' | 'pwm', value: number) => void) {
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-        }
-
-        this.flushTimer = setTimeout(() => {
-            if (this.errorBuffer.length > 0) {
-                // Check for pin state messages in the remaining buffer
-                const pinModeMatch = this.errorBuffer.match(/\[\[PIN_MODE:(\d+):(\d+)\]\]/);
-                const pinValueMatch = this.errorBuffer.match(/\[\[PIN_VALUE:(\d+):(\d+)\]\]/);
-                const pinPwmMatch = this.errorBuffer.match(/\[\[PIN_PWM:(\d+):(\d+)\]\]/);
-                
-                if (pinModeMatch && onPinState) {
-                    onPinState(parseInt(pinModeMatch[1]), 'mode', parseInt(pinModeMatch[2]));
-                } else if (pinValueMatch && onPinState) {
-                    onPinState(parseInt(pinValueMatch[1]), 'value', parseInt(pinValueMatch[2]));
-                } else if (pinPwmMatch && onPinState) {
-                    onPinState(parseInt(pinPwmMatch[1]), 'pwm', parseInt(pinPwmMatch[2]));
-                } else {
-                    this.logger.warn(`[STDERR auto-flush]: ${JSON.stringify(this.errorBuffer)}`);
-                    onError(this.errorBuffer);
-                }
-                this.errorBuffer = "";
-            }
-            this.flushTimer = null;
-        }, 50);
-    }
-
     sendSerialInput(input: string) {
         this.logger.debug(`Serial Input im Runner angekommen: ${input}`);
         if (this.isRunning && this.process && this.process.stdin && !this.process.killed) {
@@ -613,14 +557,84 @@ int main() {
         }
     }
 
+    // Send output character by character with baudrate delay
+    private sendOutputWithDelay(onOutput: (line: string, isComplete?: boolean) => void) {
+        if (this.outputBuffer.length === 0 || !this.isRunning) {
+            this.isSendingOutput = false;
+            return;
+        }
+
+        this.isSendingOutput = true;
+        const char = this.outputBuffer[0];
+        this.outputBuffer = this.outputBuffer.slice(1);
+
+        // Check output size limit for sent bytes
+        this.totalOutputBytes += 1;
+        if (this.totalOutputBytes > SANDBOX_CONFIG.maxOutputBytes) {
+            this.stop();
+            // Don't send the char, stop instead
+            return;
+        }
+
+        // Send the character
+        onOutput(char, false); // Mark as incomplete for now
+
+        // Calculate delay for next character
+        const charDelayMs = Math.max(1, (10 * 1000) / this.baudrate);
+        this.logger.debug(`Sending char '${char}', delay: ${charDelayMs}ms, buffer length: ${this.outputBuffer.length}`);
+
+        setTimeout(() => this.sendOutputWithDelay(onOutput), charDelayMs);
+    }
+
+    private scheduleFlush(onOutput: (line: string, isComplete?: boolean) => void) {
+        if (this.flushTimer) return;
+        
+        this.flushTimer = setTimeout(() => {
+            this.flushTimer = null;
+            if (this.outputBuffer.length > 0) {
+                onOutput(this.outputBuffer, true);
+                this.outputBuffer = "";
+                this.pendingIncomplete = false;
+            }
+        }, Math.max(1, (10 * 1000) / this.baudrate)); // Flush after one char delay
+    }
+
+    private scheduleErrorFlush(onError: (line: string) => void, onPinState?: (pin: number, type: 'mode' | 'value' | 'pwm', value: number) => void) {
+        // Similar to scheduleFlush but for errors
+        // For simplicity, just flush immediately for errors
+        if (this.errorBuffer.length > 0) {
+            const lines = this.errorBuffer.split(/\r?\n/);
+            this.errorBuffer = lines.pop() || "";
+            lines.forEach(line => {
+                if (line.length > 0) {
+                    // Check for pin state messages
+                    const pinModeMatch = line.match(/\[\[PIN_MODE:(\d+):(\d+)\]\]/);
+                    const pinValueMatch = line.match(/\[\[PIN_VALUE:(\d+):(\d+)\]\]/);
+                    const pinPwmMatch = line.match(/\[\[PIN_PWM:(\d+):(\d+)\]\]/);
+                    
+                    if (pinModeMatch && onPinState) {
+                        const pin = parseInt(pinModeMatch[1]);
+                        const mode = parseInt(pinModeMatch[2]);
+                        onPinState(pin, 'mode', mode);
+                    } else if (pinValueMatch && onPinState) {
+                        const pin = parseInt(pinValueMatch[1]);
+                        const value = parseInt(pinValueMatch[2]);
+                        onPinState(pin, 'value', value);
+                    } else if (pinPwmMatch && onPinState) {
+                        const pin = parseInt(pinPwmMatch[1]);
+                        const value = parseInt(pinPwmMatch[2]);
+                        onPinState(pin, 'pwm', value);
+                    } else {
+                        onError(line);
+                    }
+                }
+            });
+        }
+    }
+
     stop() {
         this.isRunning = false;
         this.processKilled = true;
-
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }
 
         if (this.process) {
             this.process.kill('SIGKILL');
@@ -636,7 +650,11 @@ int main() {
 
         this.outputBuffer = "";
         this.errorBuffer = "";
-        this.pendingIncomplete = false;
+        this.isSendingOutput = false;
+        if (this.flushTimer) {
+            clearTimeout(this.flushTimer);
+            this.flushTimer = null;
+        }
     }
 
     // Public method to check sandbox status

@@ -14,10 +14,12 @@ export class ArduinoRunner {
     process: ReturnType<typeof spawn> | null = null;
     processKilled = false;
     private logger = new Logger("ArduinoRunner");
-    private outputBuffer = ""; // Buffer für incomplete lines
+    private outputBuffer = ""; // Buffer für ausstehende Ausgabe
     private errorBuffer = "";  // Buffer für error output
-    private flushTimer: NodeJS.Timeout | null = null; // Timer für auto-flush
-    private pendingIncomplete = false; // Track if we sent incomplete output
+    private lineBuffer = "";    // Buffer für aktuelle line chars
+    private lineQueue: string[] = []; // Queue für lines to send
+    private baudrate = 9600; // Default baudrate
+    private isSendingOutput = false; // Flag to prevent overlapping sends
 
     constructor() {
         mkdir(this.tempDir, { recursive: true })
@@ -39,8 +41,13 @@ export class ArduinoRunner {
         // Reset buffers for new sketch
         this.outputBuffer = "";
         this.errorBuffer = "";
-        this.pendingIncomplete = false;
+        this.isSendingOutput = false;
         let compilationFailed = false;
+
+        // Parse baudrate from code
+        const baudMatch = code.match(/Serial\s*\.\s*begin\s*\(\s*(\d+)\s*\)/);
+        this.baudrate = baudMatch ? parseInt(baudMatch[1]) : 9600;
+        this.logger.info(`Parsed baudrate: ${this.baudrate}`);
 
         const sketchId = randomUUID();
         const sketchDir = join(this.tempDir, sketchId);
@@ -135,57 +142,36 @@ int main() {
                 }
             }, timeoutMs);
 
-            // IMPROVED: Output buffering with auto-flush
+            // IMPROVED: Output buffering with baudrate simulation
             this.process.stdout?.on("data", (data) => {
-
                 const str = data.toString();
-
-                // Add to buffer
                 this.outputBuffer += str;
 
-                // Split by newlines and process complete lines
+                // Process complete lines
                 const lines = this.outputBuffer.split(/\r?\n/);
-
-                // Keep the last (potentially incomplete) line in buffer
                 this.outputBuffer = lines.pop() || "";
 
-                // Send all complete lines
+                // Queue complete lines (ignore empty lines)
                 lines.forEach(line => {
                     if (line.length > 0) {
-                        // If we have pending incomplete output, this completes it
-                        if (this.pendingIncomplete) {
-                            onOutput(line, true); // Complete the previous incomplete line
-                            this.pendingIncomplete = false;
-                        } else {
-                            onOutput(line, true); // New complete line
-                        }
+                        this.lineQueue.push(line);
                     }
                 });
 
-                // NEW: Auto-flush incomplete output after short delay (for Serial.print)
-                // Auto-Flushing des unvollständigen Buffers nach kurzer Wartezeit
-                if (this.outputBuffer.length > 0) {
-                    this.scheduleFlush(onOutput);
-                } else if (this.flushTimer) {
-                    // Wenn Buffer leer ist, evtl. bestehenden Timer löschen
-                    clearTimeout(this.flushTimer);
-                    this.flushTimer = null;
+                // Start sending if not already sending
+                if (!this.isSendingOutput && this.lineQueue.length > 0) {
+                    this.sendNextLine(onOutput);
                 }
             });
 
             this.process.stderr?.on("data", (data) => {
                 const str = data.toString();
-
-                // Add to error buffer
                 this.errorBuffer += str;
 
-                // Split by newlines and process complete lines
+                // Process complete lines immediately
                 const lines = this.errorBuffer.split(/\r?\n/);
-
-                // Keep the last (potentially incomplete) line in buffer
                 this.errorBuffer = lines.pop() || "";
 
-                // Send all complete lines
                 lines.forEach(line => {
                     if (line.length > 0) {
                         // Check for pin state messages
@@ -212,23 +198,12 @@ int main() {
                         }
                     }
                 });
-
-                // Auto-flush stderr too
-                if (this.errorBuffer.length > 0) {
-                    this.scheduleErrorFlush(onError, onPinState);
-                }
             });
 
             this.process.on("close", (code) => {
                 clearTimeout(timeout);
 
-                // Clear any pending flush timers
-                if (this.flushTimer) {
-                    clearTimeout(this.flushTimer);
-                    this.flushTimer = null;
-                }
-
-                // Send any remaining buffered output
+                // Send any remaining buffered output immediately
                 if (this.outputBuffer.trim()) {
                     onOutput(this.outputBuffer.trim(), true);
                 }
@@ -252,51 +227,6 @@ int main() {
         }
     }
 
-    // NEW: Schedule auto-flush for stdout
-    private scheduleFlush(onOutput: (line: string, isComplete: boolean) => void) {
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-        }
-
-        this.flushTimer = setTimeout(() => {
-            if (this.outputBuffer.length > 0) {
-                onOutput(this.outputBuffer, false);
-                this.pendingIncomplete = true; // Mark that we sent incomplete output
-                this.outputBuffer = "";
-            }
-            this.flushTimer = null;
-        }, 50);
-    }
-
-    // NEW: Schedule auto-flush for stderr
-    private scheduleErrorFlush(onError: (line: string) => void, onPinState?: (pin: number, type: 'mode' | 'value' | 'pwm', value: number) => void) {
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-        }
-
-        this.flushTimer = setTimeout(() => {
-            if (this.errorBuffer.length > 0) {
-                // Check for pin state messages in the remaining buffer
-                const pinModeMatch = this.errorBuffer.match(/\[\[PIN_MODE:(\d+):(\d+)\]\]/);
-                const pinValueMatch = this.errorBuffer.match(/\[\[PIN_VALUE:(\d+):(\d+)\]\]/);
-                const pinPwmMatch = this.errorBuffer.match(/\[\[PIN_PWM:(\d+):(\d+)\]\]/);
-                
-                if (pinModeMatch && onPinState) {
-                    onPinState(parseInt(pinModeMatch[1]), 'mode', parseInt(pinModeMatch[2]));
-                } else if (pinValueMatch && onPinState) {
-                    onPinState(parseInt(pinValueMatch[1]), 'value', parseInt(pinValueMatch[2]));
-                } else if (pinPwmMatch && onPinState) {
-                    onPinState(parseInt(pinPwmMatch[1]), 'pwm', parseInt(pinPwmMatch[2]));
-                } else {
-                    this.logger.warn(`[STDERR auto-flush]: ${JSON.stringify(this.errorBuffer)}`);
-                    onError(this.errorBuffer);
-                }
-                this.errorBuffer = "";
-            }
-            this.flushTimer = null;
-        }, 50);
-    }
-
     sendSerialInput(input: string) {
         this.logger.debug(`Serial Input im Runner angekommen: ${input}`);
         if (this.isRunning && this.process && this.process.stdin && !this.process.killed) {
@@ -307,15 +237,47 @@ int main() {
         }
     }
 
+    // Send output character by character with baudrate delay
+    private sendNextLine(onOutput: (line: string, isComplete?: boolean) => void) {
+        if (this.lineQueue.length === 0 || !this.isRunning) return;
+
+        const line = this.lineQueue.shift()!;
+        this.sendLineWithDelay(line, onOutput);
+    }
+
+    private sendLineWithDelay(line: string, onOutput: (line: string, isComplete?: boolean) => void) {
+        if (line.length === 0 || !this.isRunning) {
+            this.sendNextLine(onOutput);
+            return;
+        }
+
+        this.lineBuffer = line;
+        this.sendCharWithDelay(onOutput);
+    }
+
+    private sendCharWithDelay(onOutput: (line: string, isComplete?: boolean) => void) {
+        if (this.lineBuffer.length === 0 || !this.isRunning) {
+            this.isSendingOutput = false;
+            this.sendNextLine(onOutput);
+            return;
+        }
+
+        this.isSendingOutput = true;
+        const char = this.lineBuffer[0];
+        this.lineBuffer = this.lineBuffer.slice(1);
+
+        // Send the character
+        onOutput(char, false);
+
+        // Calculate delay for next character
+        const charDelayMs = Math.max(1, (10 * 1000) / this.baudrate);
+
+        setTimeout(() => this.sendCharWithDelay(onOutput), charDelayMs);
+    }
+
     stop() {
         this.isRunning = false;
         this.processKilled = true;
-
-        // Clear flush timer
-        if (this.flushTimer) {
-            clearTimeout(this.flushTimer);
-            this.flushTimer = null;
-        }
 
         if (this.process) {
             this.process.kill('SIGKILL');
@@ -325,7 +287,9 @@ int main() {
         // Clear buffers
         this.outputBuffer = "";
         this.errorBuffer = "";
-        this.pendingIncomplete = false;
+        this.lineBuffer = "";
+        this.lineQueue = [];
+        this.isSendingOutput = false;
     }
 }
 

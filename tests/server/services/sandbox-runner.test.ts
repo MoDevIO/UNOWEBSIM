@@ -48,7 +48,7 @@ describe("SandboxRunner", () => {
     (spawn as jest.Mock).mockClear();
     (execSync as jest.Mock).mockClear();
     
-    jest.spyOn(global, 'setTimeout');
+    jest.useFakeTimers();
   });
   
   afterEach(() => {
@@ -160,7 +160,8 @@ describe("SandboxRunner", () => {
       )?.[1];
       runClose(0);
 
-      expect(outputs).toContain("Hello World");
+      jest.advanceTimersByTime(100);
+      expect(outputs.join("")).toContain("Hello World");
       expect(exitCode).toBe(0);
     });
 
@@ -394,9 +395,9 @@ describe("SandboxRunner", () => {
       )?.[1];
 
       stdoutHandler(Buffer.from("Line1\nLine2\n"));
-      
-      expect(outputs).toContain("Line1");
-      expect(outputs).toContain("Line2");
+      jest.advanceTimersByTime(100);
+      expect(outputs.join("")).toContain("Line1");
+      expect(outputs.join("")).toContain("Line2");
     });
   });
 
@@ -507,11 +508,11 @@ describe("SandboxRunner", () => {
         ([event]: any[]) => event === "data"
       )?.[1];
 
-      // Send more than 1MB of data
-      const largeOutput = "x".repeat(1024 * 1024 + 100);
+      // Send more than 100MB of data
+      const largeOutput = "x".repeat(101 * 1024 * 1024);
       stdoutHandler(Buffer.from(largeOutput));
 
-      expect(errors).toContain("Output size limit exceeded (1MB)");
+      expect(errors).toContain("Output size limit exceeded");
     });
   });
 
