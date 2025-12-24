@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,6 +22,8 @@ interface ExamplesMenuProps {
 export function ExamplesMenu({ onLoadExample, backendReachable = true }: ExamplesMenuProps) {
   const [examples, setExamples] = useState<Example[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const focusedIndexRef = useRef<number>(-1);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -86,6 +88,98 @@ export function ExamplesMenu({ onLoadExample, backendReachable = true }: Example
     }
   }, [backendReachable, toast]);
 
+  // Global shortcut Meta+E to toggle examples menu
+  useEffect(() => {
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const onKey = (e: KeyboardEvent) => {
+      const isExamplesKey = (isMac ? e.metaKey : e.ctrlKey) && !e.shiftKey && e.code === 'KeyE';
+      if (isExamplesKey) {
+        // Prevent other handlers (Monaco, browser) from acting on this shortcut
+        e.preventDefault();
+        e.stopPropagation();
+        try { e.stopImmediatePropagation(); } catch {}
+        setOpen((v) => !v);
+      }
+    };
+    document.addEventListener('keydown', onKey, { capture: true });
+    return () => document.removeEventListener('keydown', onKey, { capture: true });
+  }, []);
+
+  // Keyboard navigation when menu open: arrow keys + enter
+  useEffect(() => {
+    if (!open) {
+      focusedIndexRef.current = -1;
+      return;
+    }
+
+    const getVisibleItems = () => {
+      const all = Array.from(document.querySelectorAll('[data-role="example-folder"], [data-role="example-item"]')) as HTMLElement[];
+      return all.filter(el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length));
+    };
+
+    const highlightItem = (items: HTMLElement[], idx: number) => {
+      items.forEach((it) => it.classList.remove('bg-accent', 'text-accent-foreground', 'rounded-sm'));
+      if (items[idx]) {
+        items[idx].classList.add('bg-accent', 'text-accent-foreground', 'rounded-sm');
+        items[idx].focus();
+      }
+    };
+
+    // Auto-focus the first visible item when menu opens — defer until the
+    // DropdownMenuContent has mounted and laid out (RAF).
+    const focusFirstVisible = () => {
+      const visible = getVisibleItems();
+      if (visible.length > 0) {
+        focusedIndexRef.current = 0;
+        highlightItem(visible, 0);
+        return true;
+      }
+      return false;
+    };
+
+    // Try twice with RAF to allow Radix to mount content into the portal.
+    requestAnimationFrame(() => {
+      if (!focusFirstVisible()) {
+        requestAnimationFrame(() => focusFirstVisible());
+      }
+    });
+
+    const onKey = (e: KeyboardEvent) => {
+      const items = getVisibleItems();
+      if (items.length === 0) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        const i = focusedIndexRef.current;
+        const next = i + 1 >= items.length ? 0 : Math.max(0, i + 1);
+        focusedIndexRef.current = next;
+        highlightItem(items, next);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        const i = focusedIndexRef.current;
+        const next = i - 1 < 0 ? items.length - 1 : i - 1;
+        focusedIndexRef.current = next;
+        highlightItem(items, next);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        const idx = focusedIndexRef.current >= 0 ? focusedIndexRef.current : 0;
+        items[idx]?.click();
+      } else if (e.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', onKey, { capture: true });
+      const items = getVisibleItems();
+      items.forEach((it) => it.classList.remove('bg-accent', 'text-accent-foreground', 'rounded-sm'));
+    };
+  }, [open]);
+
   const handleLoadExample = (example: Example) => {
     onLoadExample(example.filename, example.content);
     toast({
@@ -95,7 +189,7 @@ export function ExamplesMenu({ onLoadExample, backendReachable = true }: Example
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={(v) => setOpen(!!v)}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="outline"
@@ -178,7 +272,10 @@ function ExamplesTree({ examples, onLoadExample }: ExamplesTreeProps) {
             <div key={folder}>
               <button
                 onClick={() => toggleFolder(folder)}
-                className="w-full px-2 py-1.5 text-sm flex items-center gap-1 hover:bg-accent hover:text-accent-foreground text-left"
+                data-role="example-folder"
+                data-folder={folder}
+                tabIndex={0}
+                className="w-full px-2 py-1.5 text-sm flex items-center gap-1 hover:bg-accent hover:text-accent-foreground text-left focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
               >
                 <ChevronRight
                   className={`h-4 w-4 transition-transform ${
@@ -192,11 +289,14 @@ function ExamplesTree({ examples, onLoadExample }: ExamplesTreeProps) {
                 <div className="bg-muted/30">
                   {items
                     .sort((a, b) => a.filename.localeCompare(b.filename))
-                    .map((example) => (
+                    .map((example, idx) => (
                       <button
                         key={example.filename}
                         onClick={() => onLoadExample(example)}
-                        className="w-full px-4 py-1 text-xs flex items-center gap-2 hover:bg-accent hover:text-accent-foreground text-left"
+                        data-role="example-item"
+                        data-example-index={idx}
+                        tabIndex={0}
+                        className="w-full px-4 py-1 text-xs flex items-center gap-2 hover:bg-accent hover:text-accent-foreground text-left focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
                       >
                         <span className="text-muted-foreground">•</span>
                         <span>{example.name}</span>
