@@ -402,11 +402,17 @@ export default function ArduinoSimulator() {
       switch (message.type) {
         case 'serial_output': {
           // NEW: Handle isComplete flag for Serial.print() vs Serial.println()
-          const text = message.data;
+          let text = message.data;
           const isComplete = message.isComplete ?? true; // Default to true for backwards compatibility
 
           // Trigger TX LED blink (Arduino is transmitting data)
           setTxActivity(prev => prev + 1);
+
+          // Remove trailing newlines from text (they are represented by isComplete flag)
+          const isNewlineOnly = text === '\n' || text === '\r\n';
+          if (isNewlineOnly) {
+            text = ''; // Don't add the newline character to the text
+          }
 
           setSerialOutput(prev => {
             const newLines = [...prev];
@@ -414,14 +420,16 @@ export default function ArduinoSimulator() {
             if (isComplete) {
               // Check if last line is incomplete - if so, complete it
               if (newLines.length > 0 && !newLines[newLines.length - 1].complete) {
-                // Complete the existing incomplete line
+                // Complete the existing incomplete line (add text only if non-empty)
                 newLines[newLines.length - 1] = {
                   text: newLines[newLines.length - 1].text + text,
                   complete: true
                 };
               } else {
-                // Complete line without pending incomplete - add as new line
-                newLines.push({ text, complete: true });
+                // Complete line without pending incomplete - add as new line only if text is non-empty
+                if (text.length > 0) {
+                  newLines.push({ text, complete: true });
+                }
               }
             } else {
               // Incomplete line (from Serial.print) - append to last line or create new

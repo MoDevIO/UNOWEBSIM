@@ -608,8 +608,9 @@ int main() {
             return;
         }
 
-        // Send the character
-        onOutput(char, false); // Mark as incomplete for now
+        // Send the character - mark as complete if it's a newline
+        const isNewline = char === '\n';
+        onOutput(char, isNewline);
 
         // Calculate delay for next character
         const charDelayMs = Math.max(1, (10 * 1000) / this.baudrate);

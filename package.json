@@ -7,6 +7,7 @@
     "dev": "DISABLE_RATE_LIMIT=true tsx server/index.ts --host",
     "dev:full": "npm run dev & sleep 3 && npm run dev:client",
     "dev:client": "vite",
+    "preview": "vite preview",
     "build": "npm run build:client && npm run build:server && npm run build:copy-public",
     "build:client": "vite build client/ --config vite.config.ts",
     "build:server": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js --alias:@shared=./shared --external:fs --external:path --external:http --external:ws --external:url --external:express --external:crypto --external:helmet --external:express-rate-limit",
