@@ -71,12 +71,12 @@ export function CodeEditor({ value, onChange, onCompileAndRun, onFormat, readOnl
     // Configure Monaco for Arduino C++
     monaco.languages.register({ id: 'arduino-cpp' });
 
-    // Set tokens provider for Arduino C++
+    // Set tokens provider for Arduino C++ (use stateful handling for block comments)
     monaco.languages.setMonarchTokensProvider('arduino-cpp', {
       tokenizer: {
         root: [
           [/\/\/.*$/, 'comment'],
-          [/\/\*[\s\S]*?\*\//, 'comment'],
+          [/\/\*/, 'comment.block', '@comment'],
           [/".*?"/, 'string'],
           [/'.*?'/, 'string'],
           [/\b(void|int|float|double|char|bool|byte|String|long|short|unsigned)\b/, 'type'],
@@ -88,6 +88,13 @@ export function CodeEditor({ value, onChange, onCompileAndRun, onFormat, readOnl
           [/[;,.]/, 'delimiter'],
           [/\b[a-zA-Z_][a-zA-Z0-9_]*(?=\s*\()/, 'function'],
         ],
+
+        // comment state for multiline comments
+        comment: [
+          [ /\*\//, 'comment.block', '@pop' ],
+          [ /[^\/*]+/, 'comment.block' ],
+          [ /[\/*]/, 'comment.block' ]
+        ]
       },
     });
 
@@ -97,6 +104,7 @@ export function CodeEditor({ value, onChange, onCompileAndRun, onFormat, readOnl
       inherit: true,
       rules: [
         { token: 'comment', foreground: '6a9955', fontStyle: 'italic' },
+        { token: 'comment.block', foreground: '6a9955', fontStyle: 'italic' },
         { token: 'string', foreground: 'ce9178' },
         { token: 'keyword', foreground: '569cd6' },
         { token: 'type', foreground: '4ec9b0' },
