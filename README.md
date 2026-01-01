@@ -1,6 +1,6 @@
 # UnoWebSim
 
-[![Test & Coverage](https://github.com/MoDevIO/UNOWEBSIM/actions/workflows/test-coverage.yml/badge.svg?branch=main)](https://github.com/MoDevIO/UNOWEBSIM/actions/workflows/test-coverage.yml)
+[![Test & Coverage](https://github.com/MoDevIO/UNOWEBSIM/actions/workflows/test-coverage.yml/badge.svg?branch=main)](https://modevio.github.io/UNOWEBSIM/)
 
 A web-based Arduino simulator that provides an interactive code editor, compilation, and execution environment for Arduino sketches directly in the browser.
 
