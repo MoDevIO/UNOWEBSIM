@@ -45,6 +45,13 @@ jobs:
           path: coverage/lcov-report
           retention-days: 7
 
+      # ensure coverage JSON is available in the publish dir
+      - name: Copy coverage JSON into publish dir
+        if: always()
+        run: |
+          mkdir -p coverage/lcov-report
+          cp coverage/coverage-final.json coverage/lcov-report/ || true
+
       - name: Deploy coverage to GitHub Pages (gh-pages branch)
         if: always()
         uses: peaceiris/actions-gh-pages@v3
