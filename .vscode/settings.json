@@ -17,7 +17,6 @@
     ".vercelignore": true,
     ".gitlab-ci.yml": true,
     "node_modules": true,
-    ".vscode": true,
     "temp": true
   }
 }
