@@ -45,12 +45,11 @@ jobs:
           path: coverage/lcov-report
           retention-days: 7
 
-      - name: Upload coverage to GitHub Pages
+      - name: Deploy coverage to GitHub Pages (gh-pages branch)
         if: always()
-        uses: actions/upload-pages-artifact@v1
+        uses: peaceiris/actions-gh-pages@v3
         with:
-          path: coverage/lcov-report
-
-      - name: Deploy coverage to GitHub Pages
-        if: always()
-        uses: actions/deploy-pages@v1
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./coverage/lcov-report
+          publish_branch: gh-pages
+          allow_empty_commit: true
