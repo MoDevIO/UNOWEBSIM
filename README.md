@@ -1,6 +1,6 @@
 # UnoWebSim
-![Supported OS](https://img.shields.io/badge/Supported%20OS-Linux%20%26%20macOS-blue?logo=refinedgithub)
-![GitHub commit activity](https://img.shields.io/github/commit-activity/w/modevio/unowebsim?color=lightgreen)
+![Supported OS](https://img.shields.io/badge/Supported%20OS-Linux%20%26%20macOS-blue?logo=refinedgithub&logoColor=white)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/w/modevio/unowebsim?color=lightgreen&logo=git)
 <br>
 ![Tests](https://img.shields.io/github/actions/workflow/status/MoDevIO/UNOWEBSIM/test-coverage.yml?label=Tests)
 ![Test Coverage](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FMoDevIO%2FUNOWEBSIM%2Frefs%2Fheads%2Fgh-pages%2Fcoverage-summary.json&query=%24.functions.percent&suffix=%25&label=Test%20Coverage&color=purple)
