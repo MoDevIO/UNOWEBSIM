@@ -2,6 +2,8 @@
 
 ![Supported OS](https://img.shields.io/badge/Supported%20OS-Linux%20%26%20macOS-blue?logo=refinedgithub)
 [![Test & Coverage](https://github.com/MoDevIO/UNOWEBSIM/actions/workflows/test-coverage.yml/badge.svg?branch=main)](https://modevio.github.io/UNOWEBSIM/)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/w/modevio/unowebsim)
+
 
 A web-based Arduino simulator that provides an interactive code editor, compilation and Arduino Preview for Arduino sketches directly in the browser.
 
