@@ -1,0 +1,23 @@
+{
+  "files.exclude": {
+    "vite.config.ts": true,
+    "vercel.json": true,
+    "test-vercel-build.sh": true,
+    "tsconfig.json": true,
+    "tailwind.config.ts": true,
+    "screenshot.png": true,
+    "README copy.md": true,
+    "postcss.config.js": true,
+    "package-lock.json": true,
+    "LICENSE": true,
+    "jest.config.js": true,
+    "drizzle.config.ts": true,
+    "components.json": true,
+    "build.sh": true,
+    ".vercelignore": true,
+    ".gitlab-ci.yml": true,
+    "node_modules": true,
+    ".vscode": true,
+    "temp": true
+  }
+}

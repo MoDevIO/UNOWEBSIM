@@ -61,13 +61,6 @@ Thumbs.db
 # 4. ENTWICKLER-TOOLS & EDIOTREN #
 ##################################
 
-# Visual Studio Code (VS Code)
-# Ignoriert lokale Workspace-Einstellungen, die nur für den aktuellen Benutzer gelten.
-.vscode/
-
-# JetBrains IDEs (IntelliJ, WebStorm, etc.)
-# Ignoriert lokale Konfigurationsdateien.
-.idea/
 
 # Lokale oder temporäre Ordner für individuelle Tests
 .local/
